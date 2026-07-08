@@ -1,0 +1,5 @@
+/bin/
+/mr-review-watchdog
+*.local.yaml
+.DS_Store
+.idea/
