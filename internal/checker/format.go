@@ -17,8 +17,9 @@ func FormatRootMessage(problems []ProblemMR, checkedAt time.Time) string {
 
 	for _, p := range problems {
 		fmt.Fprintf(&b, "**%s** !%d — [%s](%s)\n", p.Repository, p.IID, p.Title, p.WebURL)
-		fmt.Fprintf(&b, "Автор: @%s · создан %s · ревьюеров: %d/%d%s\n\n",
-			p.Author, humanizeAge(checkedAt, p.CreatedAt), len(p.Reviewers), p.MinReviewers, formatReviewers(p.Reviewers))
+		fmt.Fprintf(&b, "Автор: @%s · создан %s · статус: %s\n", p.Author, humanizeAge(checkedAt, p.CreatedAt), p.Status)
+		fmt.Fprintf(&b, "ревьюеров: %d/%d%s · аппрувов: %d · тредов: %d (исправлено %d/%d)\n\n",
+			len(p.Reviewers), p.MinReviewers, formatReviewers(p.Reviewers), p.ApprovalsCount, p.ThreadsTotal, p.ThreadsResolved, p.ThreadsTotal)
 	}
 
 	fmt.Fprintf(&b, "Всего найдено: %d", len(problems))

@@ -24,6 +24,9 @@ type Config struct {
 type GitLabConfig struct {
 	BaseURL string `yaml:"base_url"`
 	Token   string `yaml:"token"`
+	// TeamGroup — путь до группы GitLab, чьи прямые участники считаются
+	// "нашей командой". Если пусто, фильтрация по команде не применяется.
+	TeamGroup string `yaml:"team_group"`
 }
 
 type MattermostConfig struct {

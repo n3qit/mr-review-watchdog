@@ -76,6 +76,57 @@ repositories:
 	}
 }
 
+func TestLoad_TeamGroupOptional(t *testing.T) {
+	path := writeTempConfig(t, `
+gitlab:
+  base_url: "https://gitlab.example.com"
+  token: "glpat-xxx"
+
+mattermost:
+  base_url: "https://mattermost.example.com"
+  token: "mm-token"
+  channel_id: "chan1"
+
+repositories:
+  - group/project-a
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.GitLab.TeamGroup != "" {
+		t.Errorf("TeamGroup = %q, want empty when not set", cfg.GitLab.TeamGroup)
+	}
+}
+
+func TestLoad_TeamGroupSet(t *testing.T) {
+	path := writeTempConfig(t, `
+gitlab:
+  base_url: "https://gitlab.example.com"
+  token: "glpat-xxx"
+  team_group: "group/our-team"
+
+mattermost:
+  base_url: "https://mattermost.example.com"
+  token: "mm-token"
+  channel_id: "chan1"
+
+repositories:
+  - group/project-a
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.GitLab.TeamGroup != "group/our-team" {
+		t.Errorf("TeamGroup = %q, want %q", cfg.GitLab.TeamGroup, "group/our-team")
+	}
+}
+
 func TestLoad_MissingRequiredFields(t *testing.T) {
 	path := writeTempConfig(t, `
 gitlab:

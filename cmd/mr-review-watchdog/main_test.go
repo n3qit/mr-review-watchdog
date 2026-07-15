@@ -24,7 +24,11 @@ func (f *fakeGitLabClient) GetApprovals(ctx context.Context, projectPath string,
 	return nil, nil
 }
 
-func (f *fakeGitLabClient) ListNotes(ctx context.Context, projectPath string, mrIID int) ([]gitlab.Note, error) {
+func (f *fakeGitLabClient) ListDiscussions(ctx context.Context, projectPath string, mrIID int) ([]gitlab.Discussion, error) {
+	return nil, nil
+}
+
+func (f *fakeGitLabClient) ListGroupMembers(ctx context.Context, groupPath string) ([]string, error) {
 	return nil, nil
 }
 
@@ -39,8 +43,31 @@ func (f *fakeGitLabClientWithError) GetApprovals(ctx context.Context, projectPat
 	return nil, nil
 }
 
-func (f *fakeGitLabClientWithError) ListNotes(ctx context.Context, projectPath string, mrIID int) ([]gitlab.Note, error) {
+func (f *fakeGitLabClientWithError) ListDiscussions(ctx context.Context, projectPath string, mrIID int) ([]gitlab.Discussion, error) {
 	return nil, nil
+}
+
+func (f *fakeGitLabClientWithError) ListGroupMembers(ctx context.Context, groupPath string) ([]string, error) {
+	return nil, nil
+}
+
+// fakeGitLabClientTeamFetchError возвращает ошибку только при получении участников группы.
+type fakeGitLabClientTeamFetchError struct{}
+
+func (f *fakeGitLabClientTeamFetchError) ListOpenMergeRequests(ctx context.Context, projectPath string) ([]gitlab.MergeRequest, error) {
+	return nil, nil
+}
+
+func (f *fakeGitLabClientTeamFetchError) GetApprovals(ctx context.Context, projectPath string, mrIID int) ([]string, error) {
+	return nil, nil
+}
+
+func (f *fakeGitLabClientTeamFetchError) ListDiscussions(ctx context.Context, projectPath string, mrIID int) ([]gitlab.Discussion, error) {
+	return nil, nil
+}
+
+func (f *fakeGitLabClientTeamFetchError) ListGroupMembers(ctx context.Context, groupPath string) ([]string, error) {
+	return nil, fmt.Errorf("502 bad gateway")
 }
 
 type postCall struct{ channelID, message string }
@@ -118,8 +145,15 @@ func (m *multiRepoFake) GetApprovals(ctx context.Context, projectPath string, mr
 	return m.byRepo[projectPath].GetApprovals(ctx, projectPath, mrIID)
 }
 
-func (m *multiRepoFake) ListNotes(ctx context.Context, projectPath string, mrIID int) ([]gitlab.Note, error) {
-	return m.byRepo[projectPath].ListNotes(ctx, projectPath, mrIID)
+func (m *multiRepoFake) ListDiscussions(ctx context.Context, projectPath string, mrIID int) ([]gitlab.Discussion, error) {
+	return m.byRepo[projectPath].ListDiscussions(ctx, projectPath, mrIID)
+}
+
+func (m *multiRepoFake) ListGroupMembers(ctx context.Context, groupPath string) ([]string, error) {
+	for _, c := range m.byRepo {
+		return c.ListGroupMembers(ctx, groupPath)
+	}
+	return nil, nil
 }
 
 func TestRun_OnlyErrors_PlainPostWithoutRootID(t *testing.T) {
@@ -137,6 +171,22 @@ func TestRun_OnlyErrors_PlainPostWithoutRootID(t *testing.T) {
 	}
 	if len(mm.postCalls) != 1 {
 		t.Fatalf("expected 1 CreatePost call (errors as plain message), got %d", len(mm.postCalls))
+	}
+}
+
+func TestRun_TeamFetchError_IsFatalAndSendsNoMessages(t *testing.T) {
+	now := time.Now()
+	cfg := testConfig()
+	cfg.GitLab.TeamGroup = "group/our-team"
+	mm := &mockMattermostClient{}
+
+	err := run(context.Background(), &fakeGitLabClientTeamFetchError{}, mm, cfg, now)
+	if err == nil {
+		t.Fatal("expected fatal error when team member fetch fails, got nil")
+	}
+
+	if len(mm.postCalls) != 0 || len(mm.replyCalls) != 0 {
+		t.Fatalf("expected no Mattermost calls on fatal error, got postCalls=%d replyCalls=%d", len(mm.postCalls), len(mm.replyCalls))
 	}
 }
 

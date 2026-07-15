@@ -50,12 +50,21 @@ type mattermostClient interface {
 }
 
 // run связывает компоненты: обходит репозитории, строит отчёт и отправляет
-// сообщения в Mattermost согласно правилам из раздела 4.3 ТЗ.
+// сообщения в Mattermost согласно правилам раздела "Уведомления в Mattermost" README.
 func run(ctx context.Context, gitlabClient checker.GitLabClient, mmClient mattermostClient, cfg *config.Config, now time.Time) error {
 	slog.Info("запуск проверки", "repositories", len(cfg.Repositories),
-		"min_reviewers", cfg.Check.MinReviewers, "min_age_hours", cfg.Check.MinAgeHours)
+		"min_reviewers", cfg.Check.MinReviewers, "min_age_hours", cfg.Check.MinAgeHours,
+		"team_group", cfg.GitLab.TeamGroup)
 
-	report := checker.Run(ctx, gitlabClient, cfg.Repositories, cfg.Check.MinReviewers, cfg.Check.MinAgeHours, now)
+	report, err := checker.Run(ctx, gitlabClient, cfg.Repositories, checker.Options{
+		MinReviewers: cfg.Check.MinReviewers,
+		MinAgeHours:  cfg.Check.MinAgeHours,
+		TeamGroup:    cfg.GitLab.TeamGroup,
+		Now:          now,
+	})
+	if err != nil {
+		return err
+	}
 
 	slog.Info("проверка завершена",
 		"repositories", len(cfg.Repositories),

@@ -76,24 +76,64 @@ func TestGetApprovals(t *testing.T) {
 	}
 }
 
-func TestListNotes(t *testing.T) {
+func TestListDiscussions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		notes := []Note{
-			{Author: User{Username: "sidorov"}, System: false},
-			{Author: User{Username: "sidorov"}, System: true},
+		if r.URL.EscapedPath() != "/api/v4/projects/group%2Fproject/merge_requests/7/discussions" {
+			t.Errorf("unexpected path: %s", r.URL.EscapedPath())
 		}
-		json.NewEncoder(w).Encode(notes)
+		discussions := []Discussion{
+			{
+				ID: "d1",
+				Notes: []Note{
+					{Author: User{Username: "sidorov"}, System: false, Resolvable: true, Resolved: false},
+				},
+			},
+			{
+				ID: "d2",
+				Notes: []Note{
+					{Author: User{Username: "bot"}, System: true},
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(discussions)
 	}))
 	defer server.Close()
 
 	client := NewClient(server.URL, "test-token")
-	notes, err := client.ListNotes(context.Background(), "group/project", 7)
+	discussions, err := client.ListDiscussions(context.Background(), "group/project", 7)
 	if err != nil {
-		t.Fatalf("ListNotes error: %v", err)
+		t.Fatalf("ListDiscussions error: %v", err)
 	}
 
-	if len(notes) != 2 {
-		t.Fatalf("got %d notes, want 2", len(notes))
+	if len(discussions) != 2 {
+		t.Fatalf("got %d discussions, want 2", len(discussions))
+	}
+	if !discussions[0].Notes[0].Resolvable || discussions[0].Notes[0].Resolved {
+		t.Errorf("unexpected resolvable/resolved state: %+v", discussions[0].Notes[0])
+	}
+}
+
+func TestListGroupMembers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/api/v4/groups/group%2Four-team/members" {
+			t.Errorf("unexpected path: %s", r.URL.EscapedPath())
+		}
+		users := []User{
+			{Username: "ivanov"},
+			{Username: "petrov"},
+		}
+		json.NewEncoder(w).Encode(users)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	members, err := client.ListGroupMembers(context.Background(), "group/our-team")
+	if err != nil {
+		t.Fatalf("ListGroupMembers error: %v", err)
+	}
+
+	if len(members) != 2 {
+		t.Fatalf("got %d members, want 2", len(members))
 	}
 }
 

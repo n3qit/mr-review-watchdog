@@ -30,9 +30,10 @@ func NewClient(baseURL, token string) *Client {
 	}
 }
 
-// projectPath — путь до проекта вида "group/project" или "group/subgroup/project".
-func projectID(projectPath string) string {
-	return url.PathEscape(projectPath)
+// encodeID экранирует путь до проекта или группы вида "group/project"
+// или "group/subgroup/project" для использования в URL GitLab API.
+func encodeID(path string) string {
+	return url.PathEscape(path)
 }
 
 func (c *Client) get(ctx context.Context, path string, query url.Values, out interface{}) error {
@@ -77,7 +78,7 @@ func (c *Client) ListOpenMergeRequests(ctx context.Context, projectPath string) 
 			"page":     {fmt.Sprintf("%d", page)},
 		}
 
-		path := fmt.Sprintf("/projects/%s/merge_requests", projectID(projectPath))
+		path := fmt.Sprintf("/projects/%s/merge_requests", encodeID(projectPath))
 		if err := c.get(ctx, path, query, &pageResult); err != nil {
 			return nil, fmt.Errorf("получение списка МР для %s: %w", projectPath, err)
 		}
@@ -97,7 +98,7 @@ func (c *Client) ListOpenMergeRequests(ctx context.Context, projectPath string) 
 func (c *Client) GetApprovals(ctx context.Context, projectPath string, mrIID int) ([]string, error) {
 	var result approvalsResponse
 
-	path := fmt.Sprintf("/projects/%s/merge_requests/%d/approvals", projectID(projectPath), mrIID)
+	path := fmt.Sprintf("/projects/%s/merge_requests/%d/approvals", encodeID(projectPath), mrIID)
 	if err := c.get(ctx, path, nil, &result); err != nil {
 		return nil, fmt.Errorf("получение approvals для %s !%d: %w", projectPath, mrIID, err)
 	}
@@ -110,24 +111,57 @@ func (c *Client) GetApprovals(ctx context.Context, projectPath string, mrIID int
 	return usernames, nil
 }
 
-// ListNotes возвращает все notes (комментарии и системные заметки) МР, обходя пагинацию.
-func (c *Client) ListNotes(ctx context.Context, projectPath string, mrIID int) ([]Note, error) {
-	var all []Note
+// ListDiscussions возвращает все треды обсуждения (discussions) МР, обходя пагинацию.
+// В отличие от Notes API, каждая заметка в треде несёт признаки resolvable/resolved,
+// необходимые для определения статуса ревью.
+func (c *Client) ListDiscussions(ctx context.Context, projectPath string, mrIID int) ([]Discussion, error) {
+	var all []Discussion
 	page := 1
 
 	for {
-		var pageResult []Note
+		var pageResult []Discussion
 		query := url.Values{
 			"per_page": {fmt.Sprintf("%d", perPage)},
 			"page":     {fmt.Sprintf("%d", page)},
 		}
 
-		path := fmt.Sprintf("/projects/%s/merge_requests/%d/notes", projectID(projectPath), mrIID)
+		path := fmt.Sprintf("/projects/%s/merge_requests/%d/discussions", encodeID(projectPath), mrIID)
 		if err := c.get(ctx, path, query, &pageResult); err != nil {
-			return nil, fmt.Errorf("получение notes для %s !%d: %w", projectPath, mrIID, err)
+			return nil, fmt.Errorf("получение discussions для %s !%d: %w", projectPath, mrIID, err)
 		}
 
 		all = append(all, pageResult...)
+
+		if len(pageResult) < perPage {
+			break
+		}
+		page++
+	}
+
+	return all, nil
+}
+
+// ListGroupMembers возвращает имена пользователей — прямых участников группы GitLab
+// (без участников, унаследованных из родительских групп), обходя пагинацию.
+func (c *Client) ListGroupMembers(ctx context.Context, groupPath string) ([]string, error) {
+	var all []string
+	page := 1
+
+	for {
+		var pageResult []User
+		query := url.Values{
+			"per_page": {fmt.Sprintf("%d", perPage)},
+			"page":     {fmt.Sprintf("%d", page)},
+		}
+
+		path := fmt.Sprintf("/groups/%s/members", encodeID(groupPath))
+		if err := c.get(ctx, path, query, &pageResult); err != nil {
+			return nil, fmt.Errorf("получение участников группы %s: %w", groupPath, err)
+		}
+
+		for _, u := range pageResult {
+			all = append(all, u.Username)
+		}
 
 		if len(pageResult) < perPage {
 			break

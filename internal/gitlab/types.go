@@ -30,7 +30,17 @@ type approvalsResponse struct {
 }
 
 // Note — подмножество полей GitLab note (комментарий/системная заметка).
+// Resolvable/Resolved заполняются только для заметок, являющихся частью
+// резолвящегося code-review треда (discussion).
 type Note struct {
-	Author User `json:"author"`
-	System bool `json:"system"`
+	Author     User `json:"author"`
+	System     bool `json:"system"`
+	Resolvable bool `json:"resolvable"`
+	Resolved   bool `json:"resolved"`
+}
+
+// Discussion — тред обсуждения МР (набор заметок, объединённых общим контекстом).
+type Discussion struct {
+	ID    string `json:"id"`
+	Notes []Note `json:"notes"`
 }
