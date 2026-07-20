@@ -108,6 +108,42 @@ func TestRun_ExcludesYoungMRs(t *testing.T) {
 	if len(report.ProblemMRs) != 0 {
 		t.Errorf("expected 0 problem MRs, got %d", len(report.ProblemMRs))
 	}
+	if len(report.YoungMRs) != 1 {
+		t.Fatalf("expected 1 young MR, got %d", len(report.YoungMRs))
+	}
+	if report.TotalChecked != 0 {
+		t.Errorf("expected TotalChecked=0 (young MR not counted as checked), got %d", report.TotalChecked)
+	}
+}
+
+func TestRun_YoungMRsIncludeReviewStats(t *testing.T) {
+	now := testNow()
+	client := &mockClient{
+		mrs: map[string][]gitlab.MergeRequest{
+			"group/project": {
+				{IID: 1, Title: "fresh mr", Author: gitlab.User{Username: "ivanov"}, CreatedAt: now.Add(-1 * time.Hour)},
+			},
+		},
+		approvals: map[string][]string{
+			key("group/project", 1): {"petrov"},
+		},
+	}
+
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	if len(report.YoungMRs) != 1 {
+		t.Fatalf("expected 1 young MR, got %d", len(report.YoungMRs))
+	}
+	young := report.YoungMRs[0]
+	if len(young.Reviewers) != 1 || young.ApprovalsCount != 1 {
+		t.Errorf("expected young MR to carry review stats (1 reviewer, 1 approval), got %+v", young)
+	}
+	if young.Status != StatusFixed {
+		t.Errorf("expected young MR status %q, got %q", StatusFixed, young.Status)
+	}
 }
 
 func TestRun_CountsUniqueReviewersFromApprovalsAndDiscussions(t *testing.T) {
@@ -379,6 +415,9 @@ func TestRun_CalendarErrorIsPerMR(t *testing.T) {
 	}
 	if len(report.ProblemMRs) != 0 {
 		t.Fatalf("expected 0 problem MRs (age undetermined), got %d", len(report.ProblemMRs))
+	}
+	if len(report.YoungMRs) != 0 {
+		t.Fatalf("expected 0 young MRs (age undetermined), got %d", len(report.YoungMRs))
 	}
 	if report.TotalChecked != 0 {
 		t.Fatalf("expected TotalChecked=0 (age undetermined MR not counted), got %d", report.TotalChecked)

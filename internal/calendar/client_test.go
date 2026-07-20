@@ -45,7 +45,9 @@ func TestGetHolidays(t *testing.T) {
 }
 
 func TestGetHolidays_InvalidYear(t *testing.T) {
+	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		w.Write([]byte(`{"error": "Invalid year", "status": 422}`))
 	}))
@@ -55,6 +57,53 @@ func TestGetHolidays_InvalidYear(t *testing.T) {
 	_, err := client.GetHolidays(context.Background(), 1990)
 	if err == nil {
 		t.Fatal("expected error for invalid year, got nil")
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call (4xx is not retried), got %d", calls)
+	}
+}
+
+func TestGetHolidays_RetriesOn5xxThenSucceeds(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls < 3 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"year": 2026, "holidays": [{"date": "2026-01-01T00:00:00.000Z", "name": "Новый год"}], "status": 200}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	holidays, err := client.GetHolidays(context.Background(), 2026)
+	if err != nil {
+		t.Fatalf("GetHolidays error: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls (2 failures + 1 success), got %d", calls)
+	}
+	if len(holidays) != 1 {
+		t.Fatalf("got %d holidays, want 1", len(holidays))
+	}
+}
+
+func TestGetHolidays_FailsAfterMaxAttempts(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.GetHolidays(context.Background(), 2026)
+	if err == nil {
+		t.Fatal("expected error after exhausting retries, got nil")
+	}
+	if calls != maxAttempts {
+		t.Errorf("expected %d calls, got %d", maxAttempts, calls)
 	}
 }
 

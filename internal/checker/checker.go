@@ -6,6 +6,7 @@ package checker
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/n3qit/mr-review-watchdog/internal/gitlab"
@@ -29,8 +30,10 @@ const (
 	StatusFixed           Status = "исправлено"
 )
 
-// ProblemMR — МР, не набравший минимально необходимое количество ревьюеров.
-type ProblemMR struct {
+// MRSummary — сведения о МР и статистика его ревью. Используется как для
+// проблемных МР (не набравших ревьюеров), так и для молодых (ещё не
+// достигших порога возраста) — набор полей одинаков для обоих случаев.
+type MRSummary struct {
 	Repository      string
 	IID             int
 	Title           string
@@ -54,10 +57,15 @@ type CheckError struct {
 
 // Report — результат проверки списка репозиториев.
 type Report struct {
-	ProblemMRs []ProblemMR
-	Errors     []CheckError
-	// TotalChecked — количество не-draft МР от участников команды, прошедших
-	// фильтр по возрасту и оценённых на количество ревьюеров (независимо от результата).
+	// ProblemMRs — не-draft МР от участников команды, достигшие порога
+	// возраста, но не набравшие минимально необходимое количество ревьюеров.
+	ProblemMRs []MRSummary
+	// YoungMRs — не-draft МР от участников команды, ещё не достигшие
+	// порога возраста (со статистикой ревью на текущий момент).
+	YoungMRs []MRSummary
+	Errors   []CheckError
+	// TotalChecked — количество МР, достигших порога возраста и оценённых
+	// на количество ревьюеров (независимо от результата).
 	TotalChecked int
 }
 
@@ -71,16 +79,20 @@ type Options struct {
 	Now       time.Time
 }
 
-// Run проверяет список репозиториев и возвращает найденные проблемные МР и ошибки.
-// Ошибка при обработке одного репозитория или МР не прерывает проверку остальных.
-// Ошибка получения списка участников команды фатальна для всего прогона, так как
-// от неё зависит корректность фильтрации по всем репозиториям.
+// Run проверяет список репозиториев и возвращает найденные проблемные и
+// молодые МР, а также ошибки. Ошибка при обработке одного репозитория или
+// МР не прерывает проверку остальных. Ошибка получения списка участников
+// команды фатальна для всего прогона, так как от неё зависит корректность
+// фильтрации по всем репозиториям.
 func Run(ctx context.Context, client GitLabClient, calendarClient CalendarClient, repositories []string, opts Options) (Report, error) {
 	var report Report
 
 	teamMembers, err := loadTeamMembers(ctx, client, opts.TeamGroup)
 	if err != nil {
 		return Report{}, err
+	}
+	if opts.TeamGroup != "" {
+		slog.Info("получен список участников команды", "team_group", opts.TeamGroup, "members", len(teamMembers))
 	}
 
 	holidays := newHolidayCache(calendarClient)
@@ -94,13 +106,18 @@ func Run(ctx context.Context, client GitLabClient, calendarClient CalendarClient
 			})
 			continue
 		}
+		slog.Info("получены открытые МР репозитория", "repository", repo, "total", len(mrs))
+
+		var draftCount, nonTeamCount, youngCount, checkedCount, problemCount int
 
 		for _, mr := range mrs {
 			if mr.IsDraft() {
+				draftCount++
 				continue
 			}
 			if teamMembers != nil {
 				if _, ok := teamMembers[mr.Author.Username]; !ok {
+					nonTeamCount++
 					continue
 				}
 			}
@@ -116,11 +133,6 @@ func Run(ctx context.Context, client GitLabClient, calendarClient CalendarClient
 				})
 				continue
 			}
-			if elapsed < time.Duration(opts.MinAgeHours)*time.Hour {
-				continue
-			}
-
-			report.TotalChecked++
 
 			stats, err := reviewStatsOf(ctx, client, repo, mr)
 			if err != nil {
@@ -132,23 +144,44 @@ func Run(ctx context.Context, client GitLabClient, calendarClient CalendarClient
 				continue
 			}
 
+			summary := MRSummary{
+				Repository:      repo,
+				IID:             mr.IID,
+				Title:           mr.Title,
+				WebURL:          mr.WebURL,
+				Author:          mr.Author.Username,
+				CreatedAt:       mr.CreatedAt,
+				Reviewers:       stats.reviewers,
+				MinReviewers:    opts.MinReviewers,
+				Status:          deriveStatus(stats.approvalsCount, stats.threadsTotal, stats.threadsResolved),
+				ApprovalsCount:  stats.approvalsCount,
+				ThreadsTotal:    stats.threadsTotal,
+				ThreadsResolved: stats.threadsResolved,
+			}
+
+			if elapsed < time.Duration(opts.MinAgeHours)*time.Hour {
+				youngCount++
+				report.YoungMRs = append(report.YoungMRs, summary)
+				continue
+			}
+
+			checkedCount++
+			report.TotalChecked++
+
 			if len(stats.reviewers) < opts.MinReviewers {
-				report.ProblemMRs = append(report.ProblemMRs, ProblemMR{
-					Repository:      repo,
-					IID:             mr.IID,
-					Title:           mr.Title,
-					WebURL:          mr.WebURL,
-					Author:          mr.Author.Username,
-					CreatedAt:       mr.CreatedAt,
-					Reviewers:       stats.reviewers,
-					MinReviewers:    opts.MinReviewers,
-					Status:          deriveStatus(stats.approvalsCount, stats.threadsTotal, stats.threadsResolved),
-					ApprovalsCount:  stats.approvalsCount,
-					ThreadsTotal:    stats.threadsTotal,
-					ThreadsResolved: stats.threadsResolved,
-				})
+				problemCount++
+				report.ProblemMRs = append(report.ProblemMRs, summary)
 			}
 		}
+
+		slog.Info("обработка репозитория завершена",
+			"repository", repo,
+			"draft", draftCount,
+			"not_team", nonTeamCount,
+			"young", youngCount,
+			"checked", checkedCount,
+			"problems", problemCount,
+		)
 	}
 
 	return report, nil

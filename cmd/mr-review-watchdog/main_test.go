@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -229,6 +230,31 @@ func TestRun_CalendarFetchError_SendsErrorMessageNotFatal(t *testing.T) {
 	}
 	if len(mm.postCalls) != 1 {
 		t.Fatalf("expected 1 CreatePost call (errors as plain message), got %d", len(mm.postCalls))
+	}
+}
+
+func TestRun_OnlyYoungMRs_SendsMessageWithoutReply(t *testing.T) {
+	now := testNow()
+	gl := &fakeGitLabClient{
+		mrs: []gitlab.MergeRequest{
+			{IID: 1, Title: "fresh mr", CreatedAt: now.Add(-1 * time.Hour)},
+		},
+	}
+	cfg := testConfig()
+	mm := &mockMattermostClient{}
+
+	if err := run(context.Background(), gl, &fakeCalendarClient{}, mm, cfg, now); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	if len(mm.postCalls) != 1 {
+		t.Fatalf("expected 1 CreatePost call (young MR section), got %d", len(mm.postCalls))
+	}
+	if len(mm.replyCalls) != 0 {
+		t.Fatalf("expected 0 CreateReply calls, got %d", len(mm.replyCalls))
+	}
+	if !strings.Contains(mm.postCalls[0].message, "скоро попадут в проверку") {
+		t.Errorf("expected message to contain young MR section, got:\n%s", mm.postCalls[0].message)
 	}
 }
 

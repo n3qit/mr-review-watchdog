@@ -71,19 +71,20 @@ func run(ctx context.Context, gitlabClient checker.GitLabClient, calendarClient 
 	slog.Info("проверка завершена",
 		"repositories", len(cfg.Repositories),
 		"mrs_checked", report.TotalChecked,
+		"young_found", len(report.YoungMRs),
 		"problems_found", len(report.ProblemMRs),
 		"errors", len(report.Errors),
 	)
 
-	if len(report.ProblemMRs) == 0 && len(report.Errors) == 0 {
-		slog.Info("проблемных МР и ошибок не найдено, сообщения не отправляются")
+	if len(report.ProblemMRs) == 0 && len(report.YoungMRs) == 0 && len(report.Errors) == 0 {
+		slog.Info("молодых, проблемных МР и ошибок не найдено, сообщения не отправляются")
 		return nil
 	}
 
 	var rootPostID string
 
-	if len(report.ProblemMRs) > 0 {
-		rootMessage := checker.FormatRootMessage(report.ProblemMRs, now)
+	if len(report.ProblemMRs) > 0 || len(report.YoungMRs) > 0 {
+		rootMessage := checker.FormatRootMessage(report.YoungMRs, report.ProblemMRs, now)
 
 		postID, err := mmClient.CreatePost(ctx, cfg.Mattermost.ChannelID, rootMessage)
 		if err != nil {
@@ -91,7 +92,7 @@ func run(ctx context.Context, gitlabClient checker.GitLabClient, calendarClient 
 		}
 		rootPostID = postID
 
-		slog.Info("отправлено сообщение о проблемных МР", "count", len(report.ProblemMRs), "post_id", rootPostID)
+		slog.Info("отправлено корневое сообщение", "young", len(report.YoungMRs), "problems", len(report.ProblemMRs), "post_id", rootPostID)
 	}
 
 	if len(report.Errors) > 0 {
