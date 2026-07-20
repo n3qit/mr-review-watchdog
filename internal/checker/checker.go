@@ -75,13 +75,15 @@ type Options struct {
 // Ошибка при обработке одного репозитория или МР не прерывает проверку остальных.
 // Ошибка получения списка участников команды фатальна для всего прогона, так как
 // от неё зависит корректность фильтрации по всем репозиториям.
-func Run(ctx context.Context, client GitLabClient, repositories []string, opts Options) (Report, error) {
+func Run(ctx context.Context, client GitLabClient, calendarClient CalendarClient, repositories []string, opts Options) (Report, error) {
 	var report Report
 
 	teamMembers, err := loadTeamMembers(ctx, client, opts.TeamGroup)
 	if err != nil {
 		return Report{}, err
 	}
+
+	holidays := newHolidayCache(calendarClient)
 
 	for _, repo := range repositories {
 		mrs, err := client.ListOpenMergeRequests(ctx, repo)
@@ -102,13 +104,24 @@ func Run(ctx context.Context, client GitLabClient, repositories []string, opts O
 					continue
 				}
 			}
-			if opts.Now.Sub(mr.CreatedAt) < time.Duration(opts.MinAgeHours)*time.Hour {
+
+			iid := mr.IID
+
+			elapsed, err := businessHoursElapsed(ctx, holidays, mr.CreatedAt, opts.Now)
+			if err != nil {
+				report.Errors = append(report.Errors, CheckError{
+					Repository: repo,
+					MRIID:      &iid,
+					Message:    fmt.Sprintf("определение рабочего возраста !%d: %s", mr.IID, err),
+				})
+				continue
+			}
+			if elapsed < time.Duration(opts.MinAgeHours)*time.Hour {
 				continue
 			}
 
 			report.TotalChecked++
 
-			iid := mr.IID
 			stats, err := reviewStatsOf(ctx, client, repo, mr)
 			if err != nil {
 				report.Errors = append(report.Errors, CheckError{

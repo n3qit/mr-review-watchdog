@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/n3qit/mr-review-watchdog/internal/calendar"
 	"github.com/n3qit/mr-review-watchdog/internal/checker"
 	"github.com/n3qit/mr-review-watchdog/internal/config"
 	"github.com/n3qit/mr-review-watchdog/internal/gitlab"
@@ -35,8 +36,9 @@ func main() {
 
 	gitlabClient := gitlab.NewClient(cfg.GitLab.BaseURL, cfg.GitLab.Token)
 	mmClient := mattermost.NewClient(cfg.Mattermost.BaseURL, cfg.Mattermost.Token)
+	calendarClient := calendar.NewClient(cfg.Calendar.BaseURL)
 
-	if err := run(context.Background(), gitlabClient, mmClient, cfg, time.Now()); err != nil {
+	if err := run(context.Background(), gitlabClient, calendarClient, mmClient, cfg, time.Now()); err != nil {
 		slog.Error("проверка завершилась с ошибкой", "error", err)
 		os.Exit(1)
 	}
@@ -51,12 +53,12 @@ type mattermostClient interface {
 
 // run связывает компоненты: обходит репозитории, строит отчёт и отправляет
 // сообщения в Mattermost согласно правилам раздела "Уведомления в Mattermost" README.
-func run(ctx context.Context, gitlabClient checker.GitLabClient, mmClient mattermostClient, cfg *config.Config, now time.Time) error {
+func run(ctx context.Context, gitlabClient checker.GitLabClient, calendarClient checker.CalendarClient, mmClient mattermostClient, cfg *config.Config, now time.Time) error {
 	slog.Info("запуск проверки", "repositories", len(cfg.Repositories),
 		"min_reviewers", cfg.Check.MinReviewers, "min_age_hours", cfg.Check.MinAgeHours,
 		"team_group", cfg.GitLab.TeamGroup)
 
-	report, err := checker.Run(ctx, gitlabClient, cfg.Repositories, checker.Options{
+	report, err := checker.Run(ctx, gitlabClient, calendarClient, cfg.Repositories, checker.Options{
 		MinReviewers: cfg.Check.MinReviewers,
 		MinAgeHours:  cfg.Check.MinAgeHours,
 		TeamGroup:    cfg.GitLab.TeamGroup,

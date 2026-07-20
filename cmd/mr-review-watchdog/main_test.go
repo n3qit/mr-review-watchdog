@@ -70,6 +70,25 @@ func (f *fakeGitLabClientTeamFetchError) ListGroupMembers(ctx context.Context, g
 	return nil, fmt.Errorf("502 bad gateway")
 }
 
+// fakeCalendarClient возвращает пустой список праздников (без ошибок) —
+// на возраст МР в тестах влияют только выходные дни.
+type fakeCalendarClient struct {
+	err error
+}
+
+func (f *fakeCalendarClient) GetHolidays(ctx context.Context, year int) ([]time.Time, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return nil, nil
+}
+
+// testNow — фиксированный четверг, чтобы возраст МР в тестах не зависел
+// от дня недели, в который реально запускаются тесты.
+func testNow() time.Time {
+	return time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+}
+
 type postCall struct{ channelID, message string }
 type replyCall struct{ channelID, rootID, message string }
 
@@ -99,7 +118,7 @@ func testConfig() *config.Config {
 }
 
 func TestRun_ProblemsAndErrors_ReplyWithRootID(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	gl := &fakeGitLabClient{
 		mrs: []gitlab.MergeRequest{
 			{IID: 1, Title: "needs review", CreatedAt: now.Add(-48 * time.Hour)},
@@ -116,7 +135,7 @@ func TestRun_ProblemsAndErrors_ReplyWithRootID(t *testing.T) {
 		},
 	}
 
-	if err := run(context.Background(), gitlabWithBrokenRepo, mm, cfg, now); err != nil {
+	if err := run(context.Background(), gitlabWithBrokenRepo, &fakeCalendarClient{}, mm, cfg, now); err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
 
@@ -157,12 +176,12 @@ func (m *multiRepoFake) ListGroupMembers(ctx context.Context, groupPath string) 
 }
 
 func TestRun_OnlyErrors_PlainPostWithoutRootID(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	cfg := testConfig()
 	cfg.Repositories = []string{"group/broken"}
 	mm := &mockMattermostClient{}
 
-	if err := run(context.Background(), &fakeGitLabClientWithError{}, mm, cfg, now); err != nil {
+	if err := run(context.Background(), &fakeGitLabClientWithError{}, &fakeCalendarClient{}, mm, cfg, now); err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
 
@@ -175,12 +194,12 @@ func TestRun_OnlyErrors_PlainPostWithoutRootID(t *testing.T) {
 }
 
 func TestRun_TeamFetchError_IsFatalAndSendsNoMessages(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	cfg := testConfig()
 	cfg.GitLab.TeamGroup = "group/our-team"
 	mm := &mockMattermostClient{}
 
-	err := run(context.Background(), &fakeGitLabClientTeamFetchError{}, mm, cfg, now)
+	err := run(context.Background(), &fakeGitLabClientTeamFetchError{}, &fakeCalendarClient{}, mm, cfg, now)
 	if err == nil {
 		t.Fatal("expected fatal error when team member fetch fails, got nil")
 	}
@@ -190,13 +209,36 @@ func TestRun_TeamFetchError_IsFatalAndSendsNoMessages(t *testing.T) {
 	}
 }
 
+func TestRun_CalendarFetchError_SendsErrorMessageNotFatal(t *testing.T) {
+	now := testNow()
+	gl := &fakeGitLabClient{
+		mrs: []gitlab.MergeRequest{
+			{IID: 1, Title: "needs review", CreatedAt: now.Add(-48 * time.Hour)},
+		},
+	}
+	cfg := testConfig()
+	mm := &mockMattermostClient{}
+
+	err := run(context.Background(), gl, &fakeCalendarClient{err: fmt.Errorf("502 bad gateway")}, mm, cfg, now)
+	if err != nil {
+		t.Fatalf("run returned error: %v, want nil (calendar errors are per-MR, not fatal)", err)
+	}
+
+	if len(mm.replyCalls) != 0 {
+		t.Fatalf("expected 0 CreateReply calls when there is no root post, got %d", len(mm.replyCalls))
+	}
+	if len(mm.postCalls) != 1 {
+		t.Fatalf("expected 1 CreatePost call (errors as plain message), got %d", len(mm.postCalls))
+	}
+}
+
 func TestRun_NoProblemsNoErrors_NoMessagesSent(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	gl := &fakeGitLabClient{mrs: nil}
 	cfg := testConfig()
 	mm := &mockMattermostClient{}
 
-	if err := run(context.Background(), gl, mm, cfg, now); err != nil {
+	if err := run(context.Background(), gl, &fakeCalendarClient{}, mm, cfg, now); err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
 

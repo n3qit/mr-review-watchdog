@@ -17,6 +17,7 @@ const (
 type Config struct {
 	GitLab       GitLabConfig     `yaml:"gitlab"`
 	Mattermost   MattermostConfig `yaml:"mattermost"`
+	Calendar     CalendarConfig   `yaml:"calendar"`
 	Check        CheckConfig      `yaml:"check"`
 	Repositories []string         `yaml:"repositories"`
 }
@@ -33,6 +34,14 @@ type MattermostConfig struct {
 	BaseURL   string `yaml:"base_url"`
 	Token     string `yaml:"token"`
 	ChannelID string `yaml:"channel_id"`
+}
+
+// CalendarConfig — настройки API производственного календаря РФ,
+// используемого для исключения выходных и праздников из возраста МР.
+type CalendarConfig struct {
+	// BaseURL — адрес сервера API. Если пусто, используется публичный
+	// calendar.kuzyak.in.
+	BaseURL string `yaml:"base_url"`
 }
 
 type CheckConfig struct {

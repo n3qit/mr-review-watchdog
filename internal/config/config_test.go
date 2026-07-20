@@ -127,6 +127,59 @@ repositories:
 	}
 }
 
+func TestLoad_CalendarBaseURLOptional(t *testing.T) {
+	path := writeTempConfig(t, `
+gitlab:
+  base_url: "https://gitlab.example.com"
+  token: "glpat-xxx"
+
+mattermost:
+  base_url: "https://mattermost.example.com"
+  token: "mm-token"
+  channel_id: "chan1"
+
+repositories:
+  - group/project-a
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.Calendar.BaseURL != "" {
+		t.Errorf("Calendar.BaseURL = %q, want empty when not set", cfg.Calendar.BaseURL)
+	}
+}
+
+func TestLoad_CalendarBaseURLSet(t *testing.T) {
+	path := writeTempConfig(t, `
+gitlab:
+  base_url: "https://gitlab.example.com"
+  token: "glpat-xxx"
+
+mattermost:
+  base_url: "https://mattermost.example.com"
+  token: "mm-token"
+  channel_id: "chan1"
+
+calendar:
+  base_url: "https://calendar.internal.example.com"
+
+repositories:
+  - group/project-a
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.Calendar.BaseURL != "https://calendar.internal.example.com" {
+		t.Errorf("Calendar.BaseURL = %q, want %q", cfg.Calendar.BaseURL, "https://calendar.internal.example.com")
+	}
+}
+
 func TestLoad_MissingRequiredFields(t *testing.T) {
 	path := writeTempConfig(t, `
 gitlab:

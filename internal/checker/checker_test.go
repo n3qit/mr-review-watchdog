@@ -10,6 +10,20 @@ import (
 	"github.com/n3qit/mr-review-watchdog/internal/gitlab"
 )
 
+// testNow — фиксированный четверг (2026-07-16), чтобы смещения вроде
+// "-48h"/"-1h" в тестах не зависели от дня недели, в который реально
+// запускаются тесты, и не пересекали выходные непреднамеренно.
+func testNow() time.Time {
+	return time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+}
+
+// noHolidays — календарь без праздников: на возраст МР влияют только
+// выходные дни (Сб/Вс), что и используется в тестах, не посвящённых
+// собственно календарной логике (она отдельно покрыта в businesstime_test.go).
+func noHolidays() *stubCalendarClient {
+	return &stubCalendarClient{}
+}
+
 type mockClient struct {
 	mrs             map[string][]gitlab.MergeRequest
 	mrsErr          map[string]error
@@ -56,7 +70,7 @@ func (m *mockClient) ListGroupMembers(ctx context.Context, groupPath string) ([]
 }
 
 func TestRun_ExcludesDraftMRs(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project": {
@@ -66,7 +80,7 @@ func TestRun_ExcludesDraftMRs(t *testing.T) {
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -77,7 +91,7 @@ func TestRun_ExcludesDraftMRs(t *testing.T) {
 }
 
 func TestRun_ExcludesYoungMRs(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project": {
@@ -86,7 +100,7 @@ func TestRun_ExcludesYoungMRs(t *testing.T) {
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -97,7 +111,7 @@ func TestRun_ExcludesYoungMRs(t *testing.T) {
 }
 
 func TestRun_CountsUniqueReviewersFromApprovalsAndDiscussions(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project": {
@@ -122,7 +136,7 @@ func TestRun_CountsUniqueReviewersFromApprovalsAndDiscussions(t *testing.T) {
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -133,7 +147,7 @@ func TestRun_CountsUniqueReviewersFromApprovalsAndDiscussions(t *testing.T) {
 }
 
 func TestRun_ProblemMRWhenNotEnoughReviewers(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project": {
@@ -150,7 +164,7 @@ func TestRun_ProblemMRWhenNotEnoughReviewers(t *testing.T) {
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -167,7 +181,7 @@ func TestRun_ProblemMRWhenNotEnoughReviewers(t *testing.T) {
 }
 
 func TestRun_RepoErrorDoesNotAbortOthers(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project-b": {
@@ -184,7 +198,7 @@ func TestRun_RepoErrorDoesNotAbortOthers(t *testing.T) {
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project-a", "group/project-b"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project-a", "group/project-b"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -198,7 +212,7 @@ func TestRun_RepoErrorDoesNotAbortOthers(t *testing.T) {
 }
 
 func TestRun_MRErrorDoesNotAbortRepo(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project": {
@@ -211,7 +225,7 @@ func TestRun_MRErrorDoesNotAbortRepo(t *testing.T) {
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -228,14 +242,14 @@ func TestRun_MRErrorDoesNotAbortRepo(t *testing.T) {
 }
 
 func TestRun_NoProblemsNoErrors(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project": {},
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -246,7 +260,7 @@ func TestRun_NoProblemsNoErrors(t *testing.T) {
 }
 
 func TestRun_TeamFilter_ExcludesNonTeamAuthors(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project": {
@@ -259,7 +273,7 @@ func TestRun_TeamFilter_ExcludesNonTeamAuthors(t *testing.T) {
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, TeamGroup: "group/our-team", Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, TeamGroup: "group/our-team", Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -273,7 +287,7 @@ func TestRun_TeamFilter_ExcludesNonTeamAuthors(t *testing.T) {
 }
 
 func TestRun_TeamFilter_EmptyGroupMeansNoFilter(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project": {
@@ -282,7 +296,7 @@ func TestRun_TeamFilter_EmptyGroupMeansNoFilter(t *testing.T) {
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -293,19 +307,19 @@ func TestRun_TeamFilter_EmptyGroupMeansNoFilter(t *testing.T) {
 }
 
 func TestRun_TeamFilter_FetchErrorIsFatal(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		groupMembersErr: errors.New("502 bad gateway"),
 	}
 
-	_, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, TeamGroup: "group/our-team", Now: now})
+	_, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 2, MinAgeHours: 24, TeamGroup: "group/our-team", Now: now})
 	if err == nil {
 		t.Fatal("expected fatal error when team member fetch fails, got nil")
 	}
 }
 
 func TestRun_ThreadStats(t *testing.T) {
-	now := time.Now()
+	now := testNow()
 	client := &mockClient{
 		mrs: map[string][]gitlab.MergeRequest{
 			"group/project": {
@@ -324,7 +338,7 @@ func TestRun_ThreadStats(t *testing.T) {
 		},
 	}
 
-	report, err := Run(context.Background(), client, []string{"group/project"}, Options{MinReviewers: 5, MinAgeHours: 24, Now: now})
+	report, err := Run(context.Background(), client, noHolidays(), []string{"group/project"}, Options{MinReviewers: 5, MinAgeHours: 24, Now: now})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -342,6 +356,32 @@ func TestRun_ThreadStats(t *testing.T) {
 	}
 	if mr.Status != StatusAwaitingChanges {
 		t.Errorf("Status = %q, want %q", mr.Status, StatusAwaitingChanges)
+	}
+}
+
+func TestRun_CalendarErrorIsPerMR(t *testing.T) {
+	now := testNow()
+	client := &mockClient{
+		mrs: map[string][]gitlab.MergeRequest{
+			"group/project-b": {
+				{IID: 1, Title: "needs review", Author: gitlab.User{Username: "ivanov"}, CreatedAt: now.Add(-48 * time.Hour)},
+			},
+		},
+	}
+
+	report, err := Run(context.Background(), client, &stubCalendarClient{err: errors.New("502 bad gateway")}, []string{"group/project-b"}, Options{MinReviewers: 2, MinAgeHours: 24, Now: now})
+	if err != nil {
+		t.Fatalf("Run returned error: %v, want nil (calendar errors are per-MR)", err)
+	}
+
+	if len(report.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d: %+v", len(report.Errors), report.Errors)
+	}
+	if len(report.ProblemMRs) != 0 {
+		t.Fatalf("expected 0 problem MRs (age undetermined), got %d", len(report.ProblemMRs))
+	}
+	if report.TotalChecked != 0 {
+		t.Fatalf("expected TotalChecked=0 (age undetermined MR not counted), got %d", report.TotalChecked)
 	}
 }
 
